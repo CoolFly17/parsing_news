@@ -1,3 +1,4 @@
+from datetime import datetime
 import re
 from datetime import datetime
 import scrapy
@@ -7,74 +8,33 @@ from scrapy_news.items import NewsItem
 
 class GoldNewsSpider(CrawlSpider):
     name = 'gold_news'
-    allowed_domains = [
-        'rbc.ru',
-        'gazeta.ru',
-        'news.ru',
-        'russian.rt.com',
-        'life.ru',
-    ]
-    start_urls = [
-        'https://www.rbc.ru/',
-        'https://www.gazeta.ru/',
-        'https://news.ru/',
-        'https://russian.rt.com/',
-        'https://life.ru/',
-    ]
+    # Здесь добавляем нужный нам домен и сайт для парсинга
+    allowed_domains = ['haaretz.com']
+    start_urls = ['https://www.haaretz.com/']
 
     rules = (
         Rule(
-            LinkExtractor(
-                allow_domains=allowed_domains,
-                unique=True
-            ),
+            LinkExtractor(allow_domains=allowed_domains, unique=True),
             callback='parse_item',
             follow=True
         ),
     )
-    security_terms = [
-        "система видеонаблюдения",
-        "видеонаблюдение",
-        "охранная сигнализация",
-        "сигнализация",
-        "контроль доступа",
-        "биометрический контроль",
-        "турникет",
-        "электронный замок",
-        "датчики движения",
-        "газоанализатор",
-        "периметр",
-        "ограждение периметра",
-        "сторожевой пост",
-        "охранный пост",
-        "патруль",
-        "часовой",
-        "охранная группа",
-        "частное охранное предприятие",
-        "КПП",
-        "пропускной режим",
-        "радиоэлектронные помехи",
-        "GPS-мониторинг",
-        "RFID-метка",
-        "трекер",
-        "GPS-трекер",
-        "датчик открытия",
-        "датчик вскрытия",
-        "охранная робототехника",
-        "служебная собака",
-        "кинологическая служба",
-        "противопожарная система",
-        "СОУЭ",
-        "СОТС"
-    ]
+    # Доп фразы
+    security_terms = ["цена"]
     gold_pattern = r"золот\w*|gold\w*"
     sec_pattern = r"|".join(re.escape(term) for term in security_terms)
     gold_re = re.compile(rf"\b(?:{gold_pattern}|{sec_pattern})\b", re.IGNORECASE)
 
-    def __init__(self, start_date=None, *args, **kwargs):
-
+    def __init__(self, start_date=None, end_date=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.start_date = start_date
+        self.start_date = (
+            datetime.strptime(start_date, "%Y-%m-%d").date()
+            if start_date else None
+        )
+        self.end_date = (
+            datetime.strptime(end_date, "%Y-%m-%d").date()
+            if end_date else None
+        )
 
     def parse_item(self, response):
         title = response.css('h1::text').get()
@@ -87,18 +47,24 @@ class GoldNewsSpider(CrawlSpider):
 
         dt = (
             response.css('time::attr(datetime)').get()
-            or response.xpath(
-                '//meta[@property="article:published_time"]/@content'
-            ).get()
+            or response.xpath('//meta[@property="article:published_time"]/@content').get()
         )
         if not dt:
             return
-        pub_date = dt[:10]
+
+        try:
+            pub_date = datetime.fromisoformat(dt[:10]).date()
+        except ValueError:
+            return
 
         if self.start_date and pub_date < self.start_date:
             return
+        if self.end_date and pub_date > self.end_date:
+            return
 
-        source = response.url.split('/')[2]
-        url = response.url
-
-        yield NewsItem(date=pub_date, source=source, title=title, url=url)
+        yield NewsItem(
+            date=pub_date.isoformat(),
+            source=response.url.split('/')[2],
+            title=title,
+            url=response.url
+        )
